@@ -1,4 +1,4 @@
-Caspet Js Test Adapter
+CasperJs Test Adapter
 ======================
 CasperJs TestAdapter for Visual Studio unit test projects.
 
