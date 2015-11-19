@@ -17,6 +17,6 @@ To use just build and install the VSIX. The adapter is system independent so the
 - TrifleJs integration.
 - Intellisense for CasperJs tests.
 
-### Thanks ### 
+### Thanks
 This adapter was based on Mathew Aniyan's post [Writing a Visual Studio 2012 Unit Test Adapter](http://blogs.msdn.com/b/visualstudioalm/archive/2012/07/31/writing-a-visual-studio-2012-unit-test-adapter.aspx)
 
