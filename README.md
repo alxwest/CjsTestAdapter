@@ -8,8 +8,8 @@ To use just build and install the VSIX. The adapter is system independent so the
 
 ### Current Versions
 
-CasperJs : 1.1.Beta 
-PhantomJs : 1.9.2 
+- CasperJs : 1.1.Beta 
+- PhantomJs : 1.9.2 
 
 ### Roadmap
 - VisualStudio extensions library release.
