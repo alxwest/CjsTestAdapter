@@ -28,10 +28,10 @@ namespace CjsTestAdapter
         {
             cancelled = false;
 
-            foreach (var sourceGroup in tests.GroupBy(x => x.Source))
+            foreach (var fileGroup in tests.GroupBy(x => x.CodeFilePath))
             {
                 if (cancelled) break;
-                string jsTestFile = sourceGroup.Key;           
+                string jsTestFile = fileGroup.Key;           
                 var engineArgs = new List<string>();
 
                 string codeBase = System.Reflection.Assembly.GetExecutingAssembly().CodeBase;
@@ -138,7 +138,7 @@ namespace CjsTestAdapter
                             {
                                 //record previous result
                                 if (currentResult != null) frameworkHandle.RecordResult(currentResult);
-                                var testCase = sourceGroup.FirstOrDefault(x => x.DisplayName == testName.Result("$1"));
+                                var testCase = fileGroup.FirstOrDefault(x => x.DisplayName == testName.Result("$1"));
                                 if (testCase != null)
                                 {
                                     currentResult = new TestResult(testCase);
