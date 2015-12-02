@@ -7,19 +7,21 @@ using System.Diagnostics;
 using System.ComponentModel;
 using System.Text.RegularExpressions;
 using System.IO;
+using Jint.Parser;
+using Jint.Parser.Ast;
 
 namespace CjsTestAdapter
 {
     [ExtensionUri(CjsTestContainerDiscoverer.ExecutorUriString)]
     public class CjsTestExecutor : ITestExecutor
     {
-        private const string temp = "tmp";
-        private bool cancelled;
+        private static string[] extensions = new string[] { "js", "ts", "coffee" };
+       private bool cancelled;
 
         public void RunTests(IEnumerable<string> sources, IRunContext runContext,
             IFrameworkHandle frameworkHandle)
         {
-            IEnumerable<TestCase> tests = CjsTestDiscoverer.GetTests(sources, null);
+            IEnumerable<TestCase> tests = CjsTestDiscoverer.GetTests(sources, null, frameworkHandle);
             RunTests(tests, runContext, frameworkHandle);
         }
 
@@ -27,27 +29,29 @@ namespace CjsTestAdapter
                IFrameworkHandle frameworkHandle)
         {
             cancelled = false;
-
+            
             foreach (var fileGroup in tests.GroupBy(x => x.CodeFilePath))
             {
                 if (cancelled) break;
-                string jsTestFile = fileGroup.Key;           
-                var engineArgs = new List<string>();
+                try
+                {
+                    string jsTestFile = fileGroup.Key;
+                    var engineArgs = new List<string>();
 
-                string codeBase = System.Reflection.Assembly.GetExecutingAssembly().CodeBase;
-                UriBuilder uri = new UriBuilder(codeBase);
-                string path = Uri.UnescapeDataString(uri.Path);
-                string exeDir = Path.GetDirectoryName(path);
-                //Create temp folder for tests.
-                var temppath = Path.Combine(exeDir, temp);
-                if (!Directory.Exists(temppath)) Directory.CreateDirectory(temppath);
-                //Copy the test js file to a temporary file.
-                var tempFileName = string.Format("{0}.js", Guid.NewGuid());
-                var tempFile = Path.Combine(temppath, tempFileName);
-                File.Copy(jsTestFile, tempFile,true);
-                var casperArgs = new List<string>();
-                //TODO: Allow for SlimerJs or TrifleJS
-                string[] engineNativeArgs = new[] {
+                    string codeBase = System.Reflection.Assembly.GetExecutingAssembly().CodeBase;
+                    UriBuilder uri = new UriBuilder(codeBase);
+                    string path = Uri.UnescapeDataString(uri.Path);
+                    string exeDir = Path.GetDirectoryName(path);
+                    //Create temp folder for tests.
+                    var subDir = Path.GetDirectoryName(jsTestFile).Substring(runContext.SolutionDirectory.Length);
+                    var tmpGuid = Guid.NewGuid().ToString();
+                    var tempDir = Path.Combine(Path.GetTempPath(), tmpGuid);
+                    var subTempDir = Path.Combine(tmpGuid, subDir);
+                    var absTempPath = Path.Combine(Path.GetTempPath(), subTempDir);
+                    copyScriptAndRequired(jsTestFile, absTempPath);
+                    var casperArgs = new List<string>();
+                    //TODO: Allow for SlimerJs or TrifleJS
+                    string[] engineNativeArgs = new[] {
                                                 "cookies-file",
                                                 "config",
                                                 "debug",
@@ -76,95 +80,105 @@ namespace CjsTestAdapter
                                                 "wd",
                                                 "w",
                                             };
-                var engineExecutable = @"PhantomJs\phantomjs.exe";
-                //TODO Put casper/phantom options into a settings file (EG --ignore-ssl-errors=true)
-                foreach (string arg in new string[] { "test", Path.Combine(temp, tempFileName), "--ignore-ssl-errors=true" })
-                {
-                    bool found = false;
-                    foreach (string native in engineNativeArgs)
+                    var engineExecutable = @"PhantomJs\phantomjs.exe";
+                    //TODO Put casper/phantom options into a settings file (EG --ignore-ssl-errors=true)
+                    foreach (string arg in new string[] { "test", Path.Combine(absTempPath, Path.GetFileName(jsTestFile)), "--ignore-ssl-errors=true" })
                     {
-                        if (arg.StartsWith("--" + native))
+                        bool found = false;
+                        foreach (string native in engineNativeArgs)
                         {
-                            engineArgs.Add(arg);
-                            found = true;
+                            if (arg.StartsWith("--" + native))
+                            {
+                                engineArgs.Add(arg);
+                                found = true;
+                            }
                         }
+
+                        if (!found)
+                            if (!arg.StartsWith("--engine="))
+                                casperArgs.Add(arg);
                     }
 
-                    if (!found)
-                        if (!arg.StartsWith("--engine="))
-                            casperArgs.Add(arg);
-                }              
-
-                var casperCommand = new List<string>();
-                casperCommand.AddRange(engineArgs);
-                casperCommand.AddRange(new[] {
+                    var casperCommand = new List<string>();
+                    casperCommand.AddRange(engineArgs);
+                    casperCommand.AddRange(new[] {
                         @"CasperJs\bin\bootstrap.js",
                         "--casper-path=CasperJs",
                         "--cli"
                     });
-                casperCommand.AddRange(casperArgs);
+                    casperCommand.AddRange(casperArgs);
 
-                ProcessStartInfo psi = new ProcessStartInfo();
+                    ProcessStartInfo psi = new ProcessStartInfo();
 
-                psi.FileName = engineExecutable;
-                psi.WorkingDirectory = exeDir;
-                psi.UseShellExecute = false;
-                psi.RedirectStandardOutput = true;
-                psi.Arguments = String.Join(" ", casperCommand.ToArray());
-                
-                TestResult currentResult = null;
-                try
-                {
-                    Process p = Process.Start(psi);
-                    string error = null;
-                    while (!p.StandardOutput.EndOfStream)
+                    psi.FileName = Path.Combine(exeDir, engineExecutable);
+                    psi.WorkingDirectory = exeDir;
+                    psi.UseShellExecute = false;
+                    psi.RedirectStandardOutput = true;
+                    psi.Arguments = String.Join(" ", casperCommand.ToArray());
+
+                    TestResult currentResult = null;
+                    try
                     {
-                        string line = p.StandardOutput.ReadLine();
-                        if (!string.IsNullOrEmpty(line)) frameworkHandle.SendMessage(Microsoft.VisualStudio.TestPlatform.ObjectModel.Logging.TestMessageLevel.Informational, line);
-                        //Is it an error?
-                        if (line.Contains("CasperError"))
+                        Process p = Process.Start(psi);
+                        string error = null;
+                        while (!p.StandardOutput.EndOfStream)
                         {
-                            error = line;
+                            string line = p.StandardOutput.ReadLine();
+                            if (!string.IsNullOrEmpty(line)) frameworkHandle.SendMessage(Microsoft.VisualStudio.TestPlatform.ObjectModel.Logging.TestMessageLevel.Informational, line);
+                            //Is it an error?
+                            if (line.Contains("CasperError"))
+                            {
+                                error = line;
+                            }
+                            if (error != null)
+                            {
+                                error += line;
+                            }
+                            else
+                            {
+                                //Is it a test name?
+                                var testName = Regex.Match(line, "^# (.+?)$");
+                                if (testName.Success)
+                                {
+                                    var testCase = fileGroup.FirstOrDefault(x => x.DisplayName == testName.Result("$1"));
+                                    if (testCase != null)
+                                    {
+                                        //record previous result
+                                        if (currentResult != null) frameworkHandle.RecordResult(currentResult);
+                                        //create new result
+                                        currentResult = new TestResult(testCase);
+                                        frameworkHandle.RecordStart(testCase);
+                                        currentResult.Outcome = TestOutcome.Passed;
+                                    }
+                                }
+                                //Is it a fail?
+                                if (line.StartsWith("FAIL"))
+                                {
+                                    currentResult.Outcome = TestOutcome.Failed;
+                                    currentResult.ErrorMessage = line;
+                                }
+                            }
                         }
                         if (error != null)
                         {
-                            error += line;
+                            frameworkHandle.SendMessage(Microsoft.VisualStudio.TestPlatform.ObjectModel.Logging.TestMessageLevel.Error, error);
                         }
-                        else
-                        {
-                            //Is it a test name?
-                            var testName = Regex.Match(line, "^# (.+?)$");
-                            if (testName.Success)
-                            {
-                                //record previous result
-                                if (currentResult != null) frameworkHandle.RecordResult(currentResult);
-                                var testCase = fileGroup.FirstOrDefault(x => x.DisplayName == testName.Result("$1"));
-                                if (testCase != null)
-                                {
-                                    currentResult = new TestResult(testCase);
-                                    frameworkHandle.RecordStart(testCase);
-                                    currentResult.Outcome = TestOutcome.Passed;
-                                }
-                            }
-                            //Is it a fail?
-                            if (line.StartsWith("FAIL"))
-                            {
-                                currentResult.Outcome = TestOutcome.Failed;
-                            }
-                        }
-                    }
-                    if (error != null)
+                        //record last result
+                        if (currentResult != null) frameworkHandle.RecordResult(currentResult);
+                        p.WaitForExit();
+                        //Delete the temp dir.
+                        if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+                    } catch (Exception ex)
                     {
-                        frameworkHandle.SendMessage(Microsoft.VisualStudio.TestPlatform.ObjectModel.Logging.TestMessageLevel.Error, error);
+                        frameworkHandle.SendMessage(Microsoft.VisualStudio.TestPlatform.ObjectModel.Logging.TestMessageLevel.Error, ex.Message);
+                        throw ex;
                     }
-                    //record last result
-                    if (currentResult != null) frameworkHandle.RecordResult(currentResult);
-                    p.WaitForExit();
-                    if(File.Exists(tempFile)) File.Delete(tempFile);
-                }catch(Exception ex)
+                }catch(ParserException ex)
                 {
-                    frameworkHandle.SendMessage(Microsoft.VisualStudio.TestPlatform.ObjectModel.Logging.TestMessageLevel.Error, ex.Message);
-                    throw ex;
+                    frameworkHandle.SendMessage(Microsoft.VisualStudio.TestPlatform.ObjectModel.Logging.TestMessageLevel.Error, 
+                       string.Format("Could not parse file {0} due to syntax error on line {1}", ex.Source, ex.LineNumber));
+                    frameworkHandle.SendMessage(Microsoft.VisualStudio.TestPlatform.ObjectModel.Logging.TestMessageLevel.Error, 
+                        string.Format("ParserException: {0}", ex.Description));
                 }
             }
         }
@@ -174,6 +188,38 @@ namespace CjsTestAdapter
             cancelled = true;
         }
         public static readonly Uri ExecutorUri = new Uri(CjsTestContainerDiscoverer.ExecutorUriString);
+
+        private void copyScriptAndRequired(string codeFile, string tempDir)
+        {
+            var fileName = Path.GetFileName(codeFile);
+            if (!Directory.Exists(tempDir)) Directory.CreateDirectory(tempDir);
+            File.Copy(codeFile, Path.Combine(tempDir, fileName), true);
+
+            var code = File.ReadAllText(codeFile);
+            var parser = new JavaScriptParser();
+            var program = parser.Parse(code, new ParserOptions { Tolerant = true });
+
+            //get any "global var x = require('whatever');"
+            var required = program.VariableDeclarations.Where(x => x.Declarations.Any()
+                && x.Declarations.First().Init.Type == SyntaxNodes.CallExpression
+                && x.Declarations.First().Init.As<CallExpression>().Callee.Type == SyntaxNodes.Identifier
+                && x.Declarations.First().Init.As<CallExpression>().Callee.As<Identifier>().Name == "require"
+            )
+            .Select(x => x.Declarations.First().Init.As<CallExpression>().Arguments.First().As<Literal>().Value.ToString());
+
+            foreach (var require in required)
+            {
+                foreach (var ext in extensions)
+                {
+                    var file = string.Format("{0}.{1}", Path.Combine(Path.GetDirectoryName(codeFile), require), ext);
+                    if (File.Exists(file))
+                    {
+                        copyScriptAndRequired(file, Path.GetDirectoryName(string.Format("{0}.{1}", Path.Combine(tempDir, require), ext)));
+                    }
+                }
+            }
+
+        }
 
     }
 }

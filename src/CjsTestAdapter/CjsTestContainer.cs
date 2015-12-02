@@ -23,7 +23,7 @@ namespace CjsTestAdapter
             this.discoverer = discoverer;
             this.TargetFramework = FrameworkVersion.None;
             this.TargetPlatform = Architecture.AnyCPU;
-            this.timeStamp = GetTimeStamp();
+            this.timeStamp = GetTimeStamp();          
         }
 
         private CjsTestContainer(CjsTestContainer copy)

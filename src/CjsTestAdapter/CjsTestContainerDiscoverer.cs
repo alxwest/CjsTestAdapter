@@ -55,6 +55,10 @@ namespace CjsTestAdapter
             this.solutionListener.StartListeningForChanges();
 
             this.testFilesUpdateWatcher.FileChangedEvent += OnProjectItemChanged;
+
+            //TODO implement file watcher that works within the visual studio environment
+            //IVsDocDataFileChangeControl
+            //https://msdn.microsoft.com/en-us/library/microsoft.visualstudio.shell.interop.ivsdocdatafilechangecontrol.aspx
         }
 
         private void OnTestContainersChanged()
@@ -127,6 +131,8 @@ namespace CjsTestAdapter
                         RemoveTestContainer(e.File);
 
                         break;
+                    //If you're editing from VS this will never fire.
+                    //http://stackoverflow.com/questions/680698/why-doesnt-filesystemwatcher-detect-changes-from-visual-studio
                     case TestFileChangedReason.Changed:
                         AddTestContainerIfTestFile(e.File);
                         break;
@@ -188,16 +194,8 @@ namespace CjsTestAdapter
 
         private static bool IsCjsFile(string path)
         {
-            if (".js".Equals(Path.GetExtension(path), StringComparison.OrdinalIgnoreCase))
-            {
-                if (File.Exists(path))
-                {
-                    return File.ReadAllText(path).IndexOf("casper.test.begin", 0, StringComparison.OrdinalIgnoreCase) >= 0;
-                }
-                //Assume the deleted file was a file we were interested in.
-                return true;
-            }
-            return false;
+            //TODO: coffee and typescript
+            return ".js".Equals(Path.GetExtension(path), StringComparison.OrdinalIgnoreCase) && File.Exists(path);
         }
 
         private bool IsTestFile(string path)
